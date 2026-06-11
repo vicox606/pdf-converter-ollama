@@ -87,6 +87,9 @@ while True:
 
     print("\nAnswer:")
     print(result["result"])
-    
 
+    print("\nSources used: ")
+    for doc in result["sources_documents"]:
+        print(f"page {doc.metadata.get('page','N/A')}")
+        print("-"*50)
 
