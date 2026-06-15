@@ -1,33 +1,83 @@
-from langchain_community.document_loaders import PyPDFLoader
-import pypdf
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from pypdf import PdfReader
+import sys
+import os
 
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from sentence_transformers import SentenceTransformer
 from langchain_chroma import Chroma
 from langchain_ollama import OllamaLLM
-from langchain.prompts import PromptTemplate
+from langchain_core.prompt import PromptTemplate
 from langchain.chains import RetrievalQA 
 
+class SimpleDoc:
+    def __init__(self, page_content, metadata):
+        self.page_content = page_content
+        self.metadata = metadata
+
+
+def _make_doc(page_content, page_number):
+    return SimpleDoc(page_content, {"page": page_number})
+
+
+def load_pdf(path):
+    reader = PdfReader(path)
+    docs = []
+    for i, page in enumerate(reader.pages):
+        text = page.extract_text() or ""
+        docs.append(_make_doc(text, i + 1))
+    return docs
+
+
+# Determine PDF path (CLI arg overrides default uploaded file)
+default_pdf = "RAG problem statement.pdf"
+pdf_path = sys.argv[1] if len(sys.argv) > 1 else default_pdf
+if not os.path.exists(pdf_path):
+    raise FileNotFoundError(f"PDF not found: {pdf_path}")
+
 # Load the PDF document
-loader = PyPDFLoader(".pdf")
-documents = loader.load()
+documents = load_pdf(pdf_path)
 
 print(f"Loaded {len(documents)} pages")
 
-# Split the document into chunks
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
 
-docs = text_splitter.split_documents(documents)
+def split_documents(documents, chunk_size=500, chunk_overlap=100):
+    chunks = []
+    for doc in documents:
+        text = doc.page_content or ""
+        start = 0
+        L = len(text)
+        while start < L:
+            end = min(L, start + chunk_size)
+            chunk_text = text[start:end]
+            metadata = dict(doc.metadata) if getattr(doc, 'metadata', None) else {}
+            metadata.update({"chunk_start": start, "chunk_end": end})
+            chunks.append(SimpleDoc(chunk_text, metadata))
+            if end == L:
+                break
+            start = end - chunk_overlap
+            if start < 0:
+                start = 0
+    return chunks
+
+
+docs = split_documents(documents, chunk_size=500, chunk_overlap=100)
 print(f"Split into {len(docs)} chunks")
 
-# Create embeddings
-embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-miniLM-L6-v2")
+# Create embeddings using sentence-transformers
+st_model = SentenceTransformer("sentence-transformers/all-miniLM-L6-v2")
+
+def embedding_fn(texts):
+    single = False
+    if isinstance(texts, str):
+        texts = [texts]
+        single = True
+    vectors = st_model.encode(texts, show_progress_bar=False)
+    return vectors if not single else vectors[0]
 
 # Store it ChromaDB
 
 vectorestore = Chroma.from_documents(
     documents=docs,
-    embedding=embedding_model,
+    embedding=embedding_fn,
     persist_directory="./chroma_db",
 )
 
@@ -55,10 +105,7 @@ Question:{question}
 
 Answer:
 """
-prompt = prompt_template(
-    template=template,
-    input_variable=["context","question"]
-)
+prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
 
 # Build RAG Chain 
 
