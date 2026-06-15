@@ -8,7 +8,7 @@ import streamlit as st
 from sentence_transformers import SentenceTransformer
 
 PDF_FOLDER = "data"
-VECTOR_FOLDER = "vector_store"
+VECTOR_FOLDER =  "vector_store"
 INDEX_FILE = os.path.join(VECTOR_FOLDER, "index.faiss")
 METADATA_FILE = os.path.join(VECTOR_FOLDER, "chunks.pkl")
 
